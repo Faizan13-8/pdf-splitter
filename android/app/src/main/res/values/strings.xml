@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PDF Splitter Pro</string>
+    <string name="title_activity_main">PDF Splitter Pro</string>
+    <string name="package_name">com.makemydoc.pdfsplitter</string>
+    <string name="custom_url_scheme">com.makemydoc.pdfsplitter</string>
+</resources>
