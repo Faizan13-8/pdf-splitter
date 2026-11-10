@@ -7,3 +7,7 @@ dist-ssr
 android/app/build
 android/.gradle
 android/build
+*.js
+!vite.config.js
+!src/**/*.js
+

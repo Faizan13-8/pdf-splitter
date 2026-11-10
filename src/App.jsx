@@ -405,7 +405,7 @@ export default function App() {
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-900 text-slate-100 font-sans pb-36">
+    <div className="w-full max-w-full min-h-screen bg-slate-900 text-slate-100 font-sans pb-36 overflow-x-hidden">
       {/* Sleek Header */}
       <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 shadow-xl">
         <div className="w-full max-w-xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -862,25 +862,25 @@ export default function App() {
               </div>
 
               {/* Dynamic Preset Cards Grid */}
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-2 gap-2.5 w-full">
                 {/* Preset 1: Book + Part */}
                 <div
                   onClick={() => setNamingPreset('book_part')}
-                  className={`p-3 rounded-xl border cursor-pointer transition text-left relative ${
+                  className={`p-3 rounded-xl border cursor-pointer transition text-left relative min-w-0 overflow-hidden ${
                     namingPreset === 'book_part'
                       ? 'border-indigo-500 bg-indigo-950/70 ring-2 ring-indigo-500/50 shadow-md'
                       : 'border-slate-700/80 bg-slate-900/50 hover:border-slate-600'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-bold text-white">By Part Number</span>
+                  <div className="flex items-center justify-between mb-1 min-w-0">
+                    <span className="text-[11px] font-bold text-white truncate">By Part Number</span>
                     {namingPreset === 'book_part' && (
-                      <span className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white">
+                      <span className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white shrink-0 ml-1">
                         <Check className="w-2.5 h-2.5 stroke-[3]" />
                       </span>
                     )}
                   </div>
-                  <div className="text-[10px] text-indigo-300 font-mono truncate">
+                  <div className="text-[10px] text-indigo-300 font-mono truncate w-full block">
                     {getPartFileName(samplePartForCard, plannedParts.length || 5, 'book_part')}
                   </div>
                 </div>
@@ -888,21 +888,21 @@ export default function App() {
                 {/* Preset 2: Book + Pages */}
                 <div
                   onClick={() => setNamingPreset('book_pages')}
-                  className={`p-3 rounded-xl border cursor-pointer transition text-left relative ${
+                  className={`p-3 rounded-xl border cursor-pointer transition text-left relative min-w-0 overflow-hidden ${
                     namingPreset === 'book_pages'
                       ? 'border-indigo-500 bg-indigo-950/70 ring-2 ring-indigo-500/50 shadow-md'
                       : 'border-slate-700/80 bg-slate-900/50 hover:border-slate-600'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-bold text-white">By Page Range</span>
+                  <div className="flex items-center justify-between mb-1 min-w-0">
+                    <span className="text-[11px] font-bold text-white truncate">By Page Range</span>
                     {namingPreset === 'book_pages' && (
-                      <span className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white">
+                      <span className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white shrink-0 ml-1">
                         <Check className="w-2.5 h-2.5 stroke-[3]" />
                       </span>
                     )}
                   </div>
-                  <div className="text-[10px] text-indigo-300 font-mono truncate">
+                  <div className="text-[10px] text-indigo-300 font-mono truncate w-full block">
                     {getPartFileName(samplePartForCard, plannedParts.length || 5, 'book_pages')}
                   </div>
                 </div>
@@ -910,21 +910,21 @@ export default function App() {
                 {/* Preset 3: Book + Part + Pages */}
                 <div
                   onClick={() => setNamingPreset('book_part_pages')}
-                  className={`p-3 rounded-xl border cursor-pointer transition text-left relative ${
+                  className={`p-3 rounded-xl border cursor-pointer transition text-left relative min-w-0 overflow-hidden ${
                     namingPreset === 'book_part_pages'
                       ? 'border-indigo-500 bg-indigo-950/70 ring-2 ring-indigo-500/50 shadow-md'
                       : 'border-slate-700/80 bg-slate-900/50 hover:border-slate-600'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-bold text-white">Part + Pages</span>
+                  <div className="flex items-center justify-between mb-1 min-w-0">
+                    <span className="text-[11px] font-bold text-white truncate">Part + Pages</span>
                     {namingPreset === 'book_part_pages' && (
-                      <span className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white">
+                      <span className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white shrink-0 ml-1">
                         <Check className="w-2.5 h-2.5 stroke-[3]" />
                       </span>
                     )}
                   </div>
-                  <div className="text-[10px] text-indigo-300 font-mono truncate">
+                  <div className="text-[10px] text-indigo-300 font-mono truncate w-full block">
                     {getPartFileName(samplePartForCard, plannedParts.length || 5, 'book_part_pages')}
                   </div>
                 </div>
@@ -932,21 +932,21 @@ export default function App() {
                 {/* Preset 4: Part Only */}
                 <div
                   onClick={() => setNamingPreset('part_only')}
-                  className={`p-3 rounded-xl border cursor-pointer transition text-left relative ${
+                  className={`p-3 rounded-xl border cursor-pointer transition text-left relative min-w-0 overflow-hidden ${
                     namingPreset === 'part_only'
                       ? 'border-indigo-500 bg-indigo-950/70 ring-2 ring-indigo-500/50 shadow-md'
                       : 'border-slate-700/80 bg-slate-900/50 hover:border-slate-600'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-bold text-white">Simple Part Only</span>
+                  <div className="flex items-center justify-between mb-1 min-w-0">
+                    <span className="text-[11px] font-bold text-white truncate">Simple Part Only</span>
                     {namingPreset === 'part_only' && (
-                      <span className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white">
+                      <span className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white shrink-0 ml-1">
                         <Check className="w-2.5 h-2.5 stroke-[3]" />
                       </span>
                     )}
                   </div>
-                  <div className="text-[10px] text-indigo-300 font-mono truncate">
+                  <div className="text-[10px] text-indigo-300 font-mono truncate w-full block">
                     {getPartFileName(samplePartForCard, plannedParts.length || 5, 'part_only')}
                   </div>
                 </div>
