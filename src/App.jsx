@@ -8,7 +8,6 @@ import { Capacitor } from '@capacitor/core';
 import {
   FileText,
   Upload,
-  Split,
   Download,
   CheckCircle2,
   AlertCircle,
@@ -22,13 +21,12 @@ import {
   Trash2,
   Minus,
   Plus,
-  Share2,
-  Copy,
-  Check,
-  CheckCheck,
   Hash,
   Scissors,
-  Tag
+  Check,
+  RotateCcw,
+  Layers,
+  Settings2
 } from 'lucide-react';
 
 export default function App() {
@@ -44,13 +42,13 @@ export default function App() {
   const [splitMode, setSplitMode] = useState('chunk'); // 'chunk' or 'ranges'
   const [chunkSizeInput, setChunkSizeInput] = useState('20');
   const [startPageInput, setStartPageInput] = useState('1');
-  const [endPageInput, setEndPageInput] = useState('');
+  const [endPageInput, setEndPageInput] = useState('100');
   const [resetNumberingAtStart, setResetNumberingAtStart] = useState(true);
   const [customRangesInput, setCustomRangesInput] = useState('');
 
   // Naming configurations
   const [bookName, setBookName] = useState('');
-  const [namingPreset, setNamingPreset] = useState('book_part');
+  const [namingPreset, setNamingPreset] = useState('book_part'); // 'book_part', 'book_pages', 'book_part_pages', 'part_only', 'custom'
   const [customTemplate, setCustomTemplate] = useState('{book}_Part_{part}');
   const [padZeroes, setPadZeroes] = useState(true);
 
@@ -58,7 +56,6 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, text: '' });
   const [toastMessage, setToastMessage] = useState('');
-  const [copiedIndex, setCopiedIndex] = useState(null);
 
   // File input ref
   const fileInputRef = useRef(null);
@@ -69,7 +66,7 @@ export default function App() {
     setTimeout(() => setToastMessage(''), 4000);
   };
 
-  // Universal File Saver (Works on both Native Android APK and Desktop/Web!)
+  // Universal File Saver (Works on both Native Android APK and Desktop/Web)
   const saveFileUniversally = async (dataBlob, fileName, mimeType = 'application/pdf') => {
     try {
       if (Capacitor.isNativePlatform()) {
@@ -85,29 +82,41 @@ export default function App() {
           reader.readAsDataURL(dataBlob);
         });
 
-        // 2. Write file to device Documents directory
-        const result = await Filesystem.writeFile({
+        // 2. Always write to Cache directory first (100% reliable across all Android OS versions without runtime permission popups)
+        const cacheResult = await Filesystem.writeFile({
           path: fileName,
           data: base64Data,
-          directory: Directory.Documents,
+          directory: Directory.Cache,
           recursive: true
         });
+
+        // Also attempt writing to Documents if allowed
+        try {
+          await Filesystem.writeFile({
+            path: fileName,
+            data: base64Data,
+            directory: Directory.Documents,
+            recursive: true
+          });
+        } catch (docErr) {
+          console.warn('Documents folder write skipped:', docErr);
+        }
 
         // 3. Trigger native Android Share / Save Sheet
         try {
           await Share.share({
             title: fileName,
             text: `Exported ${fileName}`,
-            url: result.uri,
+            url: cacheResult.uri,
             dialogTitle: `Save or Open ${fileName}`
           });
           showToast(`Saved: ${fileName}`);
         } catch (shareErr) {
-          // User closed share dialog, but file is saved
-          showToast(`File saved in Documents: ${fileName}`);
+          // If share dialog was dismissed by user, file is still saved in cache/documents
+          showToast(`File ready: ${fileName}`);
         }
       } else {
-        // Web / Desktop browser download
+        // Desktop / Mobile Web browser download
         saveAs(dataBlob, fileName);
         showToast(`Downloaded: ${fileName}`);
       }
@@ -137,12 +146,14 @@ export default function App() {
       setFile(selectedFile);
       setFileBuffer(buffer);
       setTotalPages(pagesCount);
+
+      // Start page defaults to 1, End page defaults to total pages
       setStartPageInput('1');
       setEndPageInput(String(pagesCount));
 
       // Clean default book name
       const rawName = selectedFile.name.replace(/\.[^/.]+$/, '').trim();
-      const cleanName = rawName.replace(/[^a-zA-Z0-9_\-\s]/g, '').trim() || 'Document';
+      const cleanName = rawName.replace(/[^a-zA-Z0-9_\-\s]/g, '').trim().replace(/\s+/g, '_') || 'Document';
       setBookName(cleanName);
       showToast(`Loaded "${selectedFile.name}" (${pagesCount} pages)`);
     } catch (err) {
@@ -163,7 +174,7 @@ export default function App() {
         const page = pdfDoc.addPage([595, 842]);
         page.drawText(`SAMPLE BOOK — PAGE ${i}`, { x: 50, y: 790, size: 20 });
         page.drawText(`This is page ${i} of 100 in this demo PDF.`, { x: 50, y: 750, size: 14 });
-        page.drawText(`Use PDF Splitter Pro to split it into 20-page parts!`, { x: 50, y: 720, size: 12 });
+        page.drawText(`Split with PDF Splitter Pro into equal parts with custom naming.`, { x: 50, y: 720, size: 12 });
       }
       const pdfBytes = await pdfDoc.save();
       const demoBlob = new Blob([pdfBytes], { type: 'application/pdf' });
@@ -172,12 +183,14 @@ export default function App() {
       setFile(demoFile);
       setFileBuffer(pdfBytes.buffer);
       setTotalPages(100);
-      setStartPageInput('5');
+
+      // Start Page MUST default to 1, End Page MUST default to 100
+      setStartPageInput('1');
       setEndPageInput('100');
       setBookName('Sample_Book');
       setChunkSizeInput('20');
       setResetNumberingAtStart(true);
-      showToast('Loaded 100-Page Sample Demo!');
+      showToast('Loaded 100-Page Sample Demo (Pages 1 to 100)');
     } catch (err) {
       console.error(err);
       setErrorMessage('Demo generation failed: ' + err.message);
@@ -250,21 +263,25 @@ export default function App() {
     return parts;
   }, [totalPages, startPageInput, endPageInput, splitMode, chunkSizeInput, customRangesInput, resetNumberingAtStart]);
 
-  // Compute filename for a part
-  const getPartFileName = (part, totalParts) => {
-    const cleanBook = (bookName || 'Document').trim().replace(/[\s\t\n]+/g, '_');
-    const partNumStr = padZeroes && totalParts >= 10
-      ? String(part.index).padStart(2, '0')
-      : String(part.index);
+  // Compute filename for a part dynamically
+  const getPartFileName = (part, totalParts, customPreset = null) => {
+    let cleanBook = (bookName || 'Document').trim().replace(/[\\/:*?"<>|]/g, '_').replace(/[\s\t\n]+/g, '_');
+    if (!cleanBook) cleanBook = 'Document';
 
+    const digits = Math.max(2, String(totalParts || 1).length);
+    const partNumStr = padZeroes ? String(part.index).padStart(digits, '0') : String(part.index);
+
+    const activePreset = customPreset || namingPreset;
     let template = '{book}_Part_{part}';
-    if (namingPreset === 'book_part') {
+    if (activePreset === 'book_part') {
       template = '{book}_Part_{part}';
-    } else if (namingPreset === 'book_pages') {
+    } else if (activePreset === 'book_pages') {
       template = '{book}_Pages_{start}-{end}';
-    } else if (namingPreset === 'book_part_pages') {
+    } else if (activePreset === 'book_part_pages') {
       template = '{book}_Part_{part}_p{start}-p{end}';
-    } else if (namingPreset === 'custom') {
+    } else if (activePreset === 'part_only') {
+      template = 'Part_{part}';
+    } else if (activePreset === 'custom') {
       template = customTemplate || '{book}_Part_{part}';
     }
 
@@ -275,11 +292,25 @@ export default function App() {
       .replace(/{end}/g, String(part.logicalEnd))
       .replace(/{physical_start}/g, String(part.physicalStart))
       .replace(/{physical_end}/g, String(part.physicalEnd))
-      .replace(/{total_parts}/g, String(totalParts))
+      .replace(/{total_parts}/g, String(totalParts || 1))
       .replace(/{pages}/g, String(part.pageCount));
 
-    return rendered.endsWith('.pdf') ? rendered : `${rendered}.pdf`;
+    let safeName = rendered.replace(/[\\/:*?"<>|]/g, '_');
+    return safeName.endsWith('.pdf') ? safeName : `${safeName}.pdf`;
   };
+
+  // Helper for sample part preview in preset cards
+  const samplePartForCard = useMemo(() => {
+    if (plannedParts.length > 0) return plannedParts[0];
+    return {
+      index: 1,
+      physicalStart: 1,
+      physicalEnd: 20,
+      logicalStart: 1,
+      logicalEnd: 20,
+      pageCount: 20
+    };
+  }, [plannedParts]);
 
   // Extract a single part using pdf-lib
   const extractPdfPart = async (sourcePdfDoc, part) => {
@@ -297,12 +328,12 @@ export default function App() {
   const downloadSinglePart = async (part) => {
     if (!fileBuffer) return;
     setIsProcessing(true);
-    setProgress({ current: 1, total: 1, text: `Exporting Part ${part.index}...` });
+    const fileName = getPartFileName(part, plannedParts.length);
+    setProgress({ current: 1, total: 1, text: `Exporting: ${fileName}` });
 
     try {
       const srcDoc = await PDFDocument.load(fileBuffer, { ignoreEncryption: true });
       const pdfBytes = await extractPdfPart(srcDoc, part);
-      const fileName = getPartFileName(part, plannedParts.length);
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       await saveFileUniversally(blob, fileName, 'application/pdf');
     } catch (err) {
@@ -322,8 +353,6 @@ export default function App() {
 
     try {
       const zip = new JSZip();
-      const folderName = `${(bookName || 'Split_PDF').trim()}_parts`;
-      const rootFolder = zip.folder(folderName);
       const srcDoc = await PDFDocument.load(fileBuffer, { ignoreEncryption: true });
 
       for (let i = 0; i < total; i++) {
@@ -337,7 +366,7 @@ export default function App() {
         });
 
         const partBytes = await extractPdfPart(srcDoc, part);
-        rootFolder.file(fileName, partBytes);
+        zip.file(fileName, partBytes);
         await new Promise((resolve) => setTimeout(resolve, 15));
       }
 
@@ -349,7 +378,8 @@ export default function App() {
         compressionOptions: { level: 6 },
       });
 
-      const zipFileName = `${(bookName || 'Split_PDF').trim()}_all_${total}_parts.zip`;
+      const cleanBook = (bookName || 'Split_PDF').trim().replace(/[\\/:*?"<>|]/g, '_').replace(/[\s\t\n]+/g, '_') || 'Document';
+      const zipFileName = `${cleanBook}_All_${total}_Parts.zip`;
       await saveFileUniversally(zipBlob, zipFileName, 'application/zip');
     } catch (err) {
       console.error(err);
@@ -357,6 +387,13 @@ export default function App() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // Reset to full range (1 to totalPages)
+  const handleResetToFullRange = () => {
+    setStartPageInput('1');
+    setEndPageInput(String(totalPages));
+    showToast(`Reset range to 1 - ${totalPages}`);
   };
 
   // Reset all
@@ -369,20 +406,19 @@ export default function App() {
 
   return (
     <div className="w-full min-h-screen bg-slate-900 text-slate-100 font-sans pb-36">
-      {/* Ultra-Premium Tech Header */}
+      {/* Sleek Header */}
       <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 shadow-xl">
-        <div className="w-full max-w-xl mx-auto px-4 py-3.5 flex items-center justify-between">
+        <div className="w-full max-w-xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             {/* Custom Modern Gradient Logo */}
             <div className="relative w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 border border-indigo-400/30">
-              <div className="absolute inset-0 rounded-xl bg-white/10 opacity-0 hover:opacity-100 transition"></div>
-              <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                 <polyline points="14 2 14 8 20 8" />
                 <line x1="8" y1="13" x2="16" y2="13" />
                 <line x1="8" y1="17" x2="13" y2="17" />
               </svg>
-              <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-400 rounded-full border-2 border-slate-900"></div>
+              <div className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-400 rounded-full border-2 border-slate-900"></div>
             </div>
 
             <div>
@@ -399,7 +435,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-2xs">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              Offline Engine
+              100% Offline
             </span>
           </div>
         </div>
@@ -416,7 +452,7 @@ export default function App() {
       )}
 
       {/* Main Container */}
-      <main className="w-full max-w-xl mx-auto px-4 py-5 space-y-4">
+      <main className="w-full max-w-xl mx-auto px-4 py-4 space-y-4">
         {/* Upload State */}
         {!file ? (
           <div className="space-y-4">
@@ -495,7 +531,7 @@ export default function App() {
                 <div className="text-[10px] text-slate-400 mt-0.5">Count p5 as p1</div>
               </div>
               <div className="bg-slate-800/50 p-3 rounded-xl border border-slate-700/60 text-center">
-                <Tag className="w-4 h-4 text-indigo-400 mx-auto mb-1" />
+                <Layers className="w-4 h-4 text-indigo-400 mx-auto mb-1" />
                 <div className="text-white font-bold text-xs">Smart Naming</div>
                 <div className="text-[10px] text-slate-400 mt-0.5">Automated Labels</div>
               </div>
@@ -532,7 +568,7 @@ export default function App() {
               </button>
             </div>
 
-            {/* 1. Split Settings Section */}
+            {/* 1. Split Range & Page Configuration */}
             <div className="bg-slate-800/80 backdrop-blur-sm rounded-2xl border border-slate-700 p-4 space-y-4 shadow-md">
               <div className="flex items-center justify-between border-b border-slate-700/60 pb-3">
                 <div className="flex items-center gap-2">
@@ -566,8 +602,8 @@ export default function App() {
               </div>
 
               {splitMode === 'chunk' ? (
-                <div className="space-y-3.5">
-                  {/* Chunk Size with Stepper Controls */}
+                <div className="space-y-4">
+                  {/* Pages Per Split File with Stepper Controls */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-xs font-bold text-slate-300">
                       <span>Pages Per Split File:</span>
@@ -578,8 +614,9 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => {
-                          const val = Math.max(1, (parseInt(chunkSizeInput, 10) || 20) - 5);
-                          setChunkSizeInput(String(val));
+                          const currentVal = parseInt(chunkSizeInput, 10) || 20;
+                          const newVal = Math.max(1, currentVal - 5);
+                          setChunkSizeInput(String(newVal));
                         }}
                         className="w-11 h-11 rounded-xl bg-slate-900 hover:bg-slate-700 border border-slate-700 active:scale-95 flex items-center justify-center text-slate-200 transition shrink-0"
                       >
@@ -587,11 +624,11 @@ export default function App() {
                       </button>
 
                       <input
-                        type="number"
-                        min="1"
-                        max={totalPages}
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
                         value={chunkSizeInput}
-                        onChange={(e) => setChunkSizeInput(e.target.value)}
+                        onChange={(e) => setChunkSizeInput(e.target.value.replace(/[^0-9]/g, ''))}
                         onBlur={() => {
                           if (!chunkSizeInput || parseInt(chunkSizeInput, 10) < 1) {
                             setChunkSizeInput('20');
@@ -604,8 +641,9 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => {
-                          const val = Math.min(totalPages, (parseInt(chunkSizeInput, 10) || 20) + 5);
-                          setChunkSizeInput(String(val));
+                          const currentVal = parseInt(chunkSizeInput, 10) || 20;
+                          const newVal = Math.min(totalPages, currentVal + 5);
+                          setChunkSizeInput(String(newVal));
                         }}
                         className="w-11 h-11 rounded-xl bg-slate-900 hover:bg-slate-700 border border-slate-700 active:scale-95 flex items-center justify-center text-slate-200 transition shrink-0"
                       >
@@ -615,7 +653,7 @@ export default function App() {
 
                     {/* Quick Preset Chips */}
                     <div className="flex gap-1.5 pt-0.5">
-                      {['10', '20', '25', '50'].map((sz) => (
+                      {['5', '10', '20', '25', '50'].map((sz) => (
                         <button
                           key={sz}
                           type="button"
@@ -632,48 +670,120 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Start Page & End Page */}
-                  <div className="grid grid-cols-2 gap-3 pt-1">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-300">
-                        Start Page:
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        max={totalPages}
-                        value={startPageInput}
-                        onChange={(e) => setStartPageInput(e.target.value)}
-                        onBlur={() => {
-                          if (!startPageInput || parseInt(startPageInput, 10) < 1) {
-                            setStartPageInput('1');
-                          }
-                        }}
-                        placeholder="1"
-                        className="w-full h-10 px-3 rounded-xl bg-slate-900/90 border border-slate-700 text-white text-xs font-bold text-center focus:outline-none focus:border-indigo-500"
-                      />
-                      <p className="text-[10px] text-slate-400">e.g. 5 (Skip Index/Cover)</p>
+                  {/* Start Page & End Page with Interactive Stepper Controls */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+                      <span>Document Page Bounds:</span>
+                      <button
+                        type="button"
+                        onClick={handleResetToFullRange}
+                        className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-semibold transition"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        Reset (1 to {totalPages})
+                      </button>
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-300">
-                        End Page:
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        max={totalPages}
-                        value={endPageInput}
-                        onChange={(e) => setEndPageInput(e.target.value)}
-                        onBlur={() => {
-                          if (!endPageInput || parseInt(endPageInput, 10) < 1) {
-                            setEndPageInput(String(totalPages));
-                          }
-                        }}
-                        placeholder={String(totalPages)}
-                        className="w-full h-10 px-3 rounded-xl bg-slate-900/90 border border-slate-700 text-white text-xs font-bold text-center focus:outline-none focus:border-indigo-500"
-                      />
-                      <p className="text-[10px] text-slate-400">Max: {totalPages}</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {/* Start Page Stepper */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-slate-300 flex justify-between">
+                          <span>Start Page:</span>
+                          <span className="text-slate-400 text-[10px]">Min: 1</span>
+                        </label>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cur = parseInt(startPageInput, 10) || 1;
+                              const nextVal = Math.max(1, cur - 1);
+                              setStartPageInput(String(nextVal));
+                            }}
+                            className="w-9 h-10 rounded-lg bg-slate-900 hover:bg-slate-700 border border-slate-700 active:scale-95 flex items-center justify-center text-slate-200 transition shrink-0"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={startPageInput}
+                            onChange={(e) => setStartPageInput(e.target.value.replace(/[^0-9]/g, ''))}
+                            onBlur={() => {
+                              const parsed = parseInt(startPageInput, 10);
+                              if (isNaN(parsed) || parsed < 1) {
+                                setStartPageInput('1');
+                              } else if (parsed > totalPages) {
+                                setStartPageInput(String(totalPages));
+                              }
+                            }}
+                            placeholder="1"
+                            className="flex-1 h-10 px-2 rounded-lg bg-slate-900/90 border border-slate-700 text-white text-xs font-bold text-center focus:outline-none focus:border-indigo-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cur = parseInt(startPageInput, 10) || 1;
+                              const maxEnd = parseInt(endPageInput, 10) || totalPages;
+                              const nextVal = Math.min(maxEnd, cur + 1);
+                              setStartPageInput(String(nextVal));
+                            }}
+                            className="w-9 h-10 rounded-lg bg-slate-900 hover:bg-slate-700 border border-slate-700 active:scale-95 flex items-center justify-center text-slate-200 transition shrink-0"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* End Page Stepper */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-slate-300 flex justify-between">
+                          <span>End Page:</span>
+                          <span className="text-slate-400 text-[10px]">Max: {totalPages}</span>
+                        </label>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cur = parseInt(endPageInput, 10) || totalPages;
+                              const minStart = parseInt(startPageInput, 10) || 1;
+                              const nextVal = Math.max(minStart, cur - 1);
+                              setEndPageInput(String(nextVal));
+                            }}
+                            className="w-9 h-10 rounded-lg bg-slate-900 hover:bg-slate-700 border border-slate-700 active:scale-95 flex items-center justify-center text-slate-200 transition shrink-0"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={endPageInput}
+                            onChange={(e) => setEndPageInput(e.target.value.replace(/[^0-9]/g, ''))}
+                            onBlur={() => {
+                              const parsed = parseInt(endPageInput, 10);
+                              if (isNaN(parsed) || parsed < 1) {
+                                setEndPageInput(String(totalPages));
+                              } else if (parsed > totalPages) {
+                                setEndPageInput(String(totalPages));
+                              }
+                            }}
+                            placeholder={String(totalPages)}
+                            className="flex-1 h-10 px-2 rounded-lg bg-slate-900/90 border border-slate-700 text-white text-xs font-bold text-center focus:outline-none focus:border-indigo-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cur = parseInt(endPageInput, 10) || totalPages;
+                              const nextVal = Math.min(totalPages, cur + 1);
+                              setEndPageInput(String(nextVal));
+                            }}
+                            className="w-9 h-10 rounded-lg bg-slate-900 hover:bg-slate-700 border border-slate-700 active:scale-95 flex items-center justify-center text-slate-200 transition shrink-0"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -690,7 +800,7 @@ export default function App() {
                     className="w-full h-10 px-3.5 rounded-xl bg-slate-900/90 border border-slate-700 text-white text-xs font-semibold focus:outline-none focus:border-indigo-500"
                   />
                   <p className="text-[10px] text-slate-400">
-                    Enter comma-separated ranges: <span className="font-mono bg-slate-900 px-1 py-0.5 rounded text-indigo-300">5-25, 26-50, 51-100</span>
+                    Enter comma-separated ranges: <span className="font-mono bg-slate-900 px-1 py-0.5 rounded text-indigo-300">1-20, 21-40, 41-100</span>
                   </p>
                 </div>
               )}
@@ -698,13 +808,13 @@ export default function App() {
               {/* Offset Switch: Start Page = Page 1 */}
               <div className="bg-slate-900/80 border border-slate-700/80 rounded-xl p-3 flex items-center justify-between gap-3">
                 <div className="space-y-0.5">
-                  <div className="text-xs font-bold text-white">
-                    Count Start Page as Page 1 (Offset Mode)
+                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span>Count Start Page as Page 1 (Offset Index)</span>
                   </div>
                   <p className="text-[11px] text-slate-400 leading-tight">
                     {resetNumberingAtStart
-                      ? `Starting at physical page ${startPageInput || '1'} will name files as p1-20, p21-40.`
-                      : `Files will reflect original physical PDF page numbers.`}
+                      ? `Starting at PDF page ${startPageInput || '1'} will name files as p1-20, p21-40.`
+                      : `Files will reflect actual physical PDF page numbers.`}
                   </p>
                 </div>
 
@@ -727,7 +837,7 @@ export default function App() {
                 <h2 className="font-bold text-white text-sm">2. Smart File Naming</h2>
               </div>
 
-              {/* Book Name Input with Zero Pad toggle */}
+              {/* Document / Book Name Input with Zero Pad toggle */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs font-bold text-slate-300">
                   <span>Document / Book Name:</span>
@@ -738,7 +848,7 @@ export default function App() {
                       onChange={(e) => setPadZeroes(e.target.checked)}
                       className="rounded text-indigo-600 bg-slate-900 border-slate-700"
                     />
-                    <span>Leading Zeroes (01, 02)</span>
+                    <span>Leading Zeroes (01, 02...)</span>
                   </label>
                 </div>
 
@@ -746,94 +856,163 @@ export default function App() {
                   type="text"
                   value={bookName}
                   onChange={(e) => setBookName(e.target.value)}
-                  placeholder="Enter book title (e.g. Maths_Class12)"
+                  placeholder="Enter book title (e.g. Physics_Class12)"
                   className="w-full h-10 px-3.5 rounded-xl bg-slate-900/90 border border-slate-700 text-white text-xs font-bold focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
-              {/* Preset Cards Grid */}
+              {/* Dynamic Preset Cards Grid */}
               <div className="grid grid-cols-2 gap-2.5">
+                {/* Preset 1: Book + Part */}
                 <div
                   onClick={() => setNamingPreset('book_part')}
-                  className={`p-3 rounded-xl border cursor-pointer transition text-left ${
+                  className={`p-3 rounded-xl border cursor-pointer transition text-left relative ${
                     namingPreset === 'book_part'
-                      ? 'border-indigo-500 bg-indigo-950/60 ring-1 ring-indigo-500'
+                      ? 'border-indigo-500 bg-indigo-950/70 ring-2 ring-indigo-500/50 shadow-md'
                       : 'border-slate-700/80 bg-slate-900/50 hover:border-slate-600'
                   }`}
                 >
-                  <div className="text-[11px] font-bold text-white">By Part Number</div>
-                  <div className="text-[10px] text-indigo-300 font-mono mt-1 truncate">
-                    {bookName || 'Book'}_Part_1.pdf
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-white">By Part Number</span>
+                    {namingPreset === 'book_part' && (
+                      <span className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white">
+                        <Check className="w-2.5 h-2.5 stroke-[3]" />
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-indigo-300 font-mono truncate">
+                    {getPartFileName(samplePartForCard, plannedParts.length || 5, 'book_part')}
                   </div>
                 </div>
 
+                {/* Preset 2: Book + Pages */}
                 <div
                   onClick={() => setNamingPreset('book_pages')}
-                  className={`p-3 rounded-xl border cursor-pointer transition text-left ${
+                  className={`p-3 rounded-xl border cursor-pointer transition text-left relative ${
                     namingPreset === 'book_pages'
-                      ? 'border-indigo-500 bg-indigo-950/60 ring-1 ring-indigo-500'
+                      ? 'border-indigo-500 bg-indigo-950/70 ring-2 ring-indigo-500/50 shadow-md'
                       : 'border-slate-700/80 bg-slate-900/50 hover:border-slate-600'
                   }`}
                 >
-                  <div className="text-[11px] font-bold text-white">By Page Range</div>
-                  <div className="text-[10px] text-indigo-300 font-mono mt-1 truncate">
-                    {bookName || 'Book'}_Pages_1-20.pdf
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-white">By Page Range</span>
+                    {namingPreset === 'book_pages' && (
+                      <span className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white">
+                        <Check className="w-2.5 h-2.5 stroke-[3]" />
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-indigo-300 font-mono truncate">
+                    {getPartFileName(samplePartForCard, plannedParts.length || 5, 'book_pages')}
                   </div>
                 </div>
 
+                {/* Preset 3: Book + Part + Pages */}
                 <div
                   onClick={() => setNamingPreset('book_part_pages')}
-                  className={`p-3 rounded-xl border cursor-pointer transition text-left ${
+                  className={`p-3 rounded-xl border cursor-pointer transition text-left relative ${
                     namingPreset === 'book_part_pages'
-                      ? 'border-indigo-500 bg-indigo-950/60 ring-1 ring-indigo-500'
+                      ? 'border-indigo-500 bg-indigo-950/70 ring-2 ring-indigo-500/50 shadow-md'
                       : 'border-slate-700/80 bg-slate-900/50 hover:border-slate-600'
                   }`}
                 >
-                  <div className="text-[11px] font-bold text-white">Part + Pages</div>
-                  <div className="text-[10px] text-indigo-300 font-mono mt-1 truncate">
-                    {bookName || 'Book'}_Part_1_p1-20.pdf
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-white">Part + Pages</span>
+                    {namingPreset === 'book_part_pages' && (
+                      <span className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white">
+                        <Check className="w-2.5 h-2.5 stroke-[3]" />
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-indigo-300 font-mono truncate">
+                    {getPartFileName(samplePartForCard, plannedParts.length || 5, 'book_part_pages')}
                   </div>
                 </div>
 
+                {/* Preset 4: Part Only */}
                 <div
-                  onClick={() => setNamingPreset('custom')}
-                  className={`p-3 rounded-xl border cursor-pointer transition text-left ${
-                    namingPreset === 'custom'
-                      ? 'border-indigo-500 bg-indigo-950/60 ring-1 ring-indigo-500'
+                  onClick={() => setNamingPreset('part_only')}
+                  className={`p-3 rounded-xl border cursor-pointer transition text-left relative ${
+                    namingPreset === 'part_only'
+                      ? 'border-indigo-500 bg-indigo-950/70 ring-2 ring-indigo-500/50 shadow-md'
                       : 'border-slate-700/80 bg-slate-900/50 hover:border-slate-600'
                   }`}
                 >
-                  <div className="text-[11px] font-bold text-white">Custom Formula</div>
-                  <div className="text-[10px] text-indigo-300 font-mono mt-1 truncate">
-                    Formula Box
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-bold text-white">Simple Part Only</span>
+                    {namingPreset === 'part_only' && (
+                      <span className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white">
+                        <Check className="w-2.5 h-2.5 stroke-[3]" />
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-indigo-300 font-mono truncate">
+                    {getPartFileName(samplePartForCard, plannedParts.length || 5, 'part_only')}
                   </div>
                 </div>
               </div>
 
-              {/* Custom Formula Editor */}
-              {namingPreset === 'custom' && (
-                <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-700 space-y-2">
-                  <input
-                    type="text"
-                    value={customTemplate}
-                    onChange={(e) => setCustomTemplate(e.target.value)}
-                    placeholder="{book}_Part_{part}_p{start}-p{end}"
-                    className="w-full h-9 px-3 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
-                  />
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {['{book}', '{part}', '{start}', '{end}', '{total_parts}'].map((chip) => (
-                      <button
-                        key={chip}
-                        type="button"
-                        onClick={() => setCustomTemplate((prev) => prev + chip)}
-                        className="text-[10px] font-mono bg-slate-800 hover:bg-indigo-900/80 text-indigo-300 px-2 py-0.5 rounded border border-slate-700 transition"
-                      >
-                        {chip}
-                      </button>
-                    ))}
+              {/* Custom Formula Option */}
+              <div
+                onClick={() => setNamingPreset('custom')}
+                className={`p-3 rounded-xl border cursor-pointer transition text-left ${
+                  namingPreset === 'custom'
+                    ? 'border-indigo-500 bg-indigo-950/60 ring-2 ring-indigo-500/50'
+                    : 'border-slate-700/80 bg-slate-900/40 hover:border-slate-600'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Settings2 className="w-4 h-4 text-indigo-400" />
+                    <span className="text-xs font-bold text-white">Custom Formula Editor</span>
                   </div>
+                  {namingPreset === 'custom' && (
+                    <span className="w-4 h-4 rounded-full bg-indigo-500 flex items-center justify-center text-white">
+                      <Check className="w-2.5 h-2.5 stroke-[3]" />
+                    </span>
+                  )}
                 </div>
-              )}
+
+                {namingPreset === 'custom' && (
+                  <div className="mt-3 space-y-2.5 pt-2 border-t border-slate-700/60" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="text"
+                      value={customTemplate}
+                      onChange={(e) => setCustomTemplate(e.target.value)}
+                      placeholder="{book}_Part_{part}_p{start}-p{end}"
+                      className="w-full h-9 px-3 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-white focus:outline-none focus:border-indigo-500"
+                    />
+
+                    {/* Tag Insertion Buttons */}
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { tag: '{book}', label: '+ Book' },
+                        { tag: '{part}', label: '+ Part' },
+                        { tag: '{start}', label: '+ Start' },
+                        { tag: '{end}', label: '+ End' },
+                        { tag: '{total_parts}', label: '+ Total Parts' },
+                        { tag: '{pages}', label: '+ Page Count' }
+                      ].map((item) => (
+                        <button
+                          key={item.tag}
+                          type="button"
+                          onClick={() => setCustomTemplate((prev) => prev + item.tag)}
+                          className="text-[10px] font-mono bg-slate-800 hover:bg-indigo-900/80 text-indigo-300 px-2 py-1 rounded-md border border-slate-700 transition active:scale-95"
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="text-[11px] text-slate-400 flex items-center gap-1.5 pt-1">
+                      <span>Live Preview:</span>
+                      <span className="font-mono text-emerald-400 font-bold">
+                        {getPartFileName(samplePartForCard, plannedParts.length || 5, 'custom')}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* 3. Generated Split Preview Section */}
@@ -842,7 +1021,7 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <Eye className="w-4 h-4 text-indigo-400" />
                   <h2 className="font-bold text-white text-sm">
-                    3. Split Preview ({plannedParts.length} Files)
+                    3. Output Preview ({plannedParts.length} Parts)
                   </h2>
                 </div>
                 <span className="text-[11px] text-indigo-300 font-bold bg-indigo-950/80 border border-indigo-700/60 px-2.5 py-0.5 rounded-full">
@@ -861,7 +1040,7 @@ export default function App() {
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <span className="w-7 h-7 rounded-lg bg-indigo-950 text-indigo-300 border border-indigo-700/60 text-xs font-bold flex items-center justify-center shrink-0">
-                          #{part.index}
+                          #{padZeroes && plannedParts.length >= 10 ? String(part.index).padStart(2, '0') : part.index}
                         </span>
                         <div className="min-w-0">
                           <div className="text-xs font-bold text-white font-mono truncate">
@@ -927,7 +1106,7 @@ export default function App() {
               <FolderArchive className="w-5 h-5" />
               {isProcessing
                 ? 'Packaging & Saving ZIP...'
-                : `Export All as ZIP (${plannedParts.length} PDF Parts)`}
+                : `Download All as ZIP (${plannedParts.length} Parts)`}
             </button>
           </div>
         </div>
